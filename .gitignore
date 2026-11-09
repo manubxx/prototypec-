@@ -1,0 +1,19 @@
+# Binaries e Cartelle generate
+Binaries/*
+DerivedDataCache/*
+Intermediate/*
+Saved/*
+
+# File della soluzione Visual Studio
+.vs/
+*.VC.db
+*.opendb
+*.sln
+
+# File di lock e configurazioni locali dell'editor
+*.sublime-project
+*.sublime-workspace
+.idea/
+.vscode/
+Content/Developers/*
+Content/Collections/*
