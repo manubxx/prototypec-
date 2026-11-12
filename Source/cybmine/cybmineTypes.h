@@ -14,7 +14,17 @@ namespace CybmineConstants
 	static constexpr int32 MainInventorySlotCount = InventoryRows * InventoryCols; // 18
 	static constexpr int32 TotalStorageSlotCount = MainInventorySlotCount + HotbarSlotCount; // 24 (0..5 Hotbar, 6..23 Zaino)
 	static constexpr int32 ArmorSlotCount = 4; // 0: Elmo, 1: Corazza, 2: Gambali, 3: Stivali
+	static constexpr float MaxContainerInteractDistance = 450.0f; // 4.5 metri anti-exploit
 }
+
+UENUM(BlueprintType)
+enum class ECybmineContainerType : uint8
+{
+	PlayerInventory UMETA(DisplayName = "Inventario Giocatore"),
+	FactionChest    UMETA(DisplayName = "Cassa Fazione / Baule"),
+	AuctionStorage  UMETA(DisplayName = "Deposito Aste"),
+	LootBag         UMETA(DisplayName = "Sacco Loot PvP")
+};
 
 UENUM(BlueprintType)
 enum class EItemCategory : uint8
