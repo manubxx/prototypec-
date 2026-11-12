@@ -241,9 +241,9 @@ void AcybmineHUD::DrawHotbar(float CenterX, float ScreenHeight, UcybmineInventor
 
 		DrawBoxWithBorder(CurrentX, CurrentY, SlotSize, SlotSize, bIsSelected ? SelectedBg : SlotBg, bIsSelected ? SelectedBorder : NormalBorder, bIsSelected ? 3.0f : 2.0f);
 
-		if (InvComp && InvComp->StorageSlots.IsValidIndex(i))
+		if (InvComp && InvComp->IsValidStorageIndex(i))
 		{
-			DrawItemInSlot(CurrentX, CurrentY, SlotSize, InvComp->StorageSlots[i]);
+			DrawItemInSlot(CurrentX, CurrentY, SlotSize, InvComp->GetStorageItem(i));
 		}
 
 		DrawText(FString::FromInt(i + 1), bIsSelected ? FLinearColor::White : FLinearColor(0.65f, 0.65f, 0.65f, 0.8f), CurrentX + 5.0f, CurrentY + 3.0f, nullptr, 0.85f);
@@ -300,9 +300,10 @@ void AcybmineHUD::DrawInventory(float ScreenWidth, float ScreenHeight, AcybmineC
 		const bool bHover = (MouseX >= ContentStartX && MouseX <= ContentStartX + SlotSize && MouseY >= SlotY && MouseY <= SlotY + SlotSize);
 
 		DrawBoxWithBorder(ContentStartX, SlotY, SlotSize, SlotSize, SlotBg, bHover ? HoverBorder : SlotBorder, 2.0f);
-		if (InvComp && InvComp->ArmorSlots.IsValidIndex(r) && !InvComp->ArmorSlots[r].IsEmpty())
+		const FInventoryItem ArmorItem = (InvComp && InvComp->IsValidArmorIndex(r)) ? InvComp->GetArmorItem(r) : FInventoryItem();
+		if (!ArmorItem.IsEmpty())
 		{
-			DrawItemInSlot(ContentStartX, SlotY, SlotSize, InvComp->ArmorSlots[r]);
+			DrawItemInSlot(ContentStartX, SlotY, SlotSize, ArmorItem);
 		}
 		else
 		{
@@ -342,9 +343,9 @@ void AcybmineHUD::DrawInventory(float ScreenWidth, float ScreenHeight, AcybmineC
 			const bool bHover = (MouseX >= SlotX && MouseX <= SlotX + SlotSize && MouseY >= SlotY && MouseY <= SlotY + SlotSize);
 
 			DrawBoxWithBorder(SlotX, SlotY, SlotSize, SlotSize, SlotBg, bHover ? HoverBorder : SlotBorder, 2.0f);
-			if (InvComp && InvComp->StorageSlots.IsValidIndex(StorageIdx))
+			if (InvComp && InvComp->IsValidStorageIndex(StorageIdx))
 			{
-				DrawItemInSlot(SlotX, SlotY, SlotSize, InvComp->StorageSlots[StorageIdx]);
+				DrawItemInSlot(SlotX, SlotY, SlotSize, InvComp->GetStorageItem(StorageIdx));
 			}
 		}
 	}
@@ -359,9 +360,9 @@ void AcybmineHUD::DrawInventory(float ScreenWidth, float ScreenHeight, AcybmineC
 		const bool bSelected = (c == ActiveSlot);
 
 		DrawBoxWithBorder(SlotX, HotbarStartY, SlotSize, SlotSize, SlotBg, (bHover || bSelected) ? HoverBorder : SlotBorder, bSelected ? 3.0f : 2.0f);
-		if (InvComp && InvComp->StorageSlots.IsValidIndex(c))
+		if (InvComp && InvComp->IsValidStorageIndex(c))
 		{
-			DrawItemInSlot(SlotX, HotbarStartY, SlotSize, InvComp->StorageSlots[c]);
+			DrawItemInSlot(SlotX, HotbarStartY, SlotSize, InvComp->GetStorageItem(c));
 		}
 	}
 }

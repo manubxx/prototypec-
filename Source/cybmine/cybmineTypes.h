@@ -1,7 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Net/Serialization/FastArraySerializer.h"
 #include "cybmineTypes.generated.h"
+
+class UcybmineInventoryComponent;
 
 namespace CybmineConstants
 {
@@ -33,7 +36,6 @@ struct FInventoryItem
 {
 	GENERATED_BODY()
 
-	// Puntatore leggerissimo al UcybmineItemData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FPrimaryAssetId ItemID;
 
@@ -43,7 +45,6 @@ struct FInventoryItem
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	float CurrentDurability = 0.0f;
 
-	// ID univoco per tracciare oggetti non impilabili nelle aste ed evitare duplicazioni
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FGuid UniqueInstanceID;
 
@@ -59,4 +60,51 @@ struct FInventoryItem
 		CurrentDurability = 0.0f;
 		UniqueInstanceID.Invalidate();
 	}
+};
+
+// --- SINGOLO SLOT DELTA-REPLICATO ---
+USTRUCT(BlueprintType)
+struct FCybmineInventorySlotEntry : public FFastArraySerializerItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	int32 SlotIndex = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	FInventoryItem Item;
+
+	void PreReplicatedRemove(const struct FCybmineInventoryList& InArraySerializer);
+	void PostReplicatedAdd(const struct FCybmineInventoryList& InArraySerializer);
+	void PostReplicatedChange(const struct FCybmineInventoryList& InArraySerializer);
+};
+
+// --- CONTENITORE FAST ARRAY SERIALIZER ---
+USTRUCT(BlueprintType)
+struct FCybmineInventoryList : public FFastArraySerializer
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FCybmineInventorySlotEntry> Entries;
+
+	UPROPERTY(NotReplicated)
+	TObjectPtr<UcybmineInventoryComponent> OwnerComponent = nullptr;
+
+	UPROPERTY(NotReplicated)
+	bool bIsArmorList = false;
+
+	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParms)
+	{
+		return FFastArraySerializer::FastArrayDeltaSerialize<FCybmineInventorySlotEntry, FCybmineInventoryList>(Entries, DeltaParms, *this);
+	}
+};
+
+template<>
+struct TStructOpsTypeTraits<FCybmineInventoryList> : public TStructOpsTypeTraitsBase2<FCybmineInventoryList>
+{
+	enum
+	{
+		WithNetDeltaSerializer = true,
+	};
 };

@@ -12,6 +12,7 @@ public class cybmine : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"NetCore",
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",

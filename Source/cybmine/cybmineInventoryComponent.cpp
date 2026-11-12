@@ -3,13 +3,48 @@
 #include "Engine/AssetManager.h"
 #include "Net/UnrealNetwork.h"
 
+// ============================================================================
+// CALLBACKS DI FFastArraySerializerItem (Eseguite automaticamente sui Client)
+// ============================================================================
+
+void FCybmineInventorySlotEntry::PreReplicatedRemove(const FCybmineInventoryList& InArraySerializer)
+{
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->NotifySlotReplicated(SlotIndex, FInventoryItem(), InArraySerializer.bIsArmorList);
+	}
+}
+
+void FCybmineInventorySlotEntry::PostReplicatedAdd(const FCybmineInventoryList& InArraySerializer)
+{
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->NotifySlotReplicated(SlotIndex, Item, InArraySerializer.bIsArmorList);
+	}
+}
+
+void FCybmineInventorySlotEntry::PostReplicatedChange(const FCybmineInventoryList& InArraySerializer)
+{
+	if (InArraySerializer.OwnerComponent)
+	{
+		InArraySerializer.OwnerComponent->NotifySlotReplicated(SlotIndex, Item, InArraySerializer.bIsArmorList);
+	}
+}
+
+// ============================================================================
+// UcybmineInventoryComponent
+// ============================================================================
+
 UcybmineInventoryComponent::UcybmineInventoryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
 
-	StorageSlots.SetNum(CybmineConstants::TotalStorageSlotCount);
-	ArmorSlots.SetNum(CybmineConstants::ArmorSlotCount);
+	StorageList.OwnerComponent = this;
+	StorageList.bIsArmorList = false;
+
+	ArmorList.OwnerComponent = this;
+	ArmorList.bIsArmorList = true;
 }
 
 void UcybmineInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -17,30 +52,103 @@ void UcybmineInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(UcybmineInventoryComponent, SelectedHotbarSlot);
-	DOREPLIFETIME(UcybmineInventoryComponent, StorageSlots);
-	DOREPLIFETIME(UcybmineInventoryComponent, ArmorSlots);
+	DOREPLIFETIME(UcybmineInventoryComponent, StorageList);
+	DOREPLIFETIME(UcybmineInventoryComponent, ArmorList);
+}
+
+void UcybmineInventoryComponent::InitializeSlotArrays()
+{
+	StorageList.OwnerComponent = this;
+	StorageList.bIsArmorList = false;
+
+	ArmorList.OwnerComponent = this;
+	ArmorList.bIsArmorList = true;
+
+	// Solo il Server crea e possiede la struttura autoritativa iniziale degli slot
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		if (StorageList.Entries.Num() != CybmineConstants::TotalStorageSlotCount)
+		{
+			StorageList.Entries.SetNum(CybmineConstants::TotalStorageSlotCount);
+			for (int32 i = 0; i < CybmineConstants::TotalStorageSlotCount; ++i)
+			{
+				StorageList.Entries[i].SlotIndex = i;
+				StorageList.Entries[i].Item.Clear();
+			}
+			StorageList.MarkArrayDirty();
+		}
+
+		if (ArmorList.Entries.Num() != CybmineConstants::ArmorSlotCount)
+		{
+			ArmorList.Entries.SetNum(CybmineConstants::ArmorSlotCount);
+			for (int32 i = 0; i < CybmineConstants::ArmorSlotCount; ++i)
+			{
+				ArmorList.Entries[i].SlotIndex = i;
+				ArmorList.Entries[i].Item.Clear();
+			}
+			ArmorList.MarkArrayDirty();
+		}
+	}
 }
 
 void UcybmineInventoryComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (StorageSlots.Num() != CybmineConstants::TotalStorageSlotCount)
-	{
-		StorageSlots.SetNum(CybmineConstants::TotalStorageSlotCount);
-	}
-	if (ArmorSlots.Num() != CybmineConstants::ArmorSlotCount)
-	{
-		ArmorSlots.SetNum(CybmineConstants::ArmorSlotCount);
-	}
+	InitializeSlotArrays();
 
-	// Pre-carica asincronamente il catalogo degli ItemData registrati nell'Asset Manager
 	if (UAssetManager* Manager = UAssetManager::GetIfInitialized())
 	{
 		Manager->LoadPrimaryAssetsWithType(FPrimaryAssetType("ItemData"));
 	}
 
 	BroadcastEquippedItemChanged();
+}
+
+void UcybmineInventoryComponent::NotifySlotReplicated(int32 SlotIndex, const FInventoryItem& UpdatedItem, bool bIsArmor)
+{
+	OnInventorySlotUpdated.Broadcast(SlotIndex, UpdatedItem, bIsArmor);
+
+	// Se è cambiato lo slot attualmente impugnato nella hotbar, aggiorna la mesh 3D in mano
+	if (!bIsArmor && SlotIndex == SelectedHotbarSlot)
+	{
+		BroadcastEquippedItemChanged();
+	}
+}
+
+FInventoryItem UcybmineInventoryComponent::GetStorageItem(int32 Index) const
+{
+	if (StorageList.Entries.IsValidIndex(Index))
+	{
+		return StorageList.Entries[Index].Item;
+	}
+
+	// Fallback se su un client gli elementi replicati arrivano fuori ordine
+	for (const FCybmineInventorySlotEntry& Entry : StorageList.Entries)
+	{
+		if (Entry.SlotIndex == Index)
+		{
+			return Entry.Item;
+		}
+	}
+	return FInventoryItem();
+}
+
+FInventoryItem UcybmineInventoryComponent::GetArmorItem(int32 Index) const
+{
+	if (ArmorList.Entries.IsValidIndex(Index))
+	{
+		return ArmorList.Entries[Index].Item;
+	}
+
+	for (const FCybmineInventorySlotEntry& Entry : ArmorList.Entries)
+	{
+		if (Entry.SlotIndex == Index)
+		{
+			return Entry.Item;
+		}
+	}
+	return FInventoryItem();
 }
 
 UcybmineItemData* UcybmineInventoryComponent::GetItemData(const FPrimaryAssetId& ItemID)
@@ -50,13 +158,11 @@ UcybmineItemData* UcybmineInventoryComponent::GetItemData(const FPrimaryAssetId&
 		return nullptr;
 	}
 
-	// 1. Registro C++ in memoria
 	if (UcybmineItemData* CodeItem = UcybmineItemData::FindCodeItem(ItemID))
 	{
 		return CodeItem;
 	}
 
-	// 2. Asset Manager (solo se già caricato in memoria, zero blocchi sincroni)
 	if (UAssetManager* Manager = UAssetManager::GetIfInitialized())
 	{
 		return Cast<UcybmineItemData>(Manager->GetPrimaryAssetObject(ItemID));
@@ -97,11 +203,6 @@ void UcybmineInventoryComponent::OnRep_SelectedHotbarSlot()
 	BroadcastEquippedItemChanged();
 }
 
-void UcybmineInventoryComponent::OnRep_StorageSlots()
-{
-	BroadcastEquippedItemChanged();
-}
-
 void UcybmineInventoryComponent::BroadcastEquippedItemChanged()
 {
 	OnEquippedItemChanged.Broadcast(GetSelectedHotbarItem());
@@ -110,6 +211,22 @@ void UcybmineInventoryComponent::BroadcastEquippedItemChanged()
 void UcybmineInventoryComponent::SelectHotbarSlot(int32 SlotIndex)
 {
 	if (bIsInventoryOpen) return;
+
+	const int32 Clamped = FMath::Clamp(SlotIndex, 0, CybmineConstants::HotbarSlotCount - 1);
+	if (SelectedHotbarSlot != Clamped)
+	{
+		SelectedHotbarSlot = Clamped;
+		BroadcastEquippedItemChanged();
+
+		if (GetOwner() && !GetOwner()->HasAuthority())
+		{
+			Server_SelectHotbarSlot(Clamped);
+		}
+	}
+}
+
+void UcybmineInventoryComponent::Server_SelectHotbarSlot_Implementation(int32 SlotIndex)
+{
 	const int32 Clamped = FMath::Clamp(SlotIndex, 0, CybmineConstants::HotbarSlotCount - 1);
 	if (SelectedHotbarSlot != Clamped)
 	{
@@ -121,28 +238,27 @@ void UcybmineInventoryComponent::SelectHotbarSlot(int32 SlotIndex)
 void UcybmineInventoryComponent::NextHotbarSlot()
 {
 	if (bIsInventoryOpen) return;
-	SelectedHotbarSlot = (SelectedHotbarSlot + 1) % CybmineConstants::HotbarSlotCount;
-	BroadcastEquippedItemChanged();
+	SelectHotbarSlot((SelectedHotbarSlot + 1) % CybmineConstants::HotbarSlotCount);
 }
 
 void UcybmineInventoryComponent::PrevHotbarSlot()
 {
 	if (bIsInventoryOpen) return;
-	SelectedHotbarSlot = (SelectedHotbarSlot - 1 + CybmineConstants::HotbarSlotCount) % CybmineConstants::HotbarSlotCount;
-	BroadcastEquippedItemChanged();
+	SelectHotbarSlot((SelectedHotbarSlot - 1 + CybmineConstants::HotbarSlotCount) % CybmineConstants::HotbarSlotCount);
 }
 
 FInventoryItem UcybmineInventoryComponent::GetSelectedHotbarItem() const
 {
-	if (StorageSlots.IsValidIndex(SelectedHotbarSlot))
-	{
-		return StorageSlots[SelectedHotbarSlot];
-	}
-	return FInventoryItem();
+	return GetStorageItem(SelectedHotbarSlot);
 }
 
 bool UcybmineInventoryComponent::AddItemByID(FPrimaryAssetId ItemID, int32 Quantity)
 {
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+
 	UcybmineItemData* StaticData = GetItemData(ItemID);
 	if (!StaticData || Quantity <= 0)
 	{
@@ -164,7 +280,13 @@ bool UcybmineInventoryComponent::AddItemByID(FPrimaryAssetId ItemID, int32 Quant
 
 bool UcybmineInventoryComponent::AddItem(const FInventoryItem& NewItem)
 {
-	if (NewItem.IsEmpty()) return false;
+	// Solo il server può generare o aggiungere oggetti (anti-cheat)
+	if (!GetOwner() || !GetOwner()->HasAuthority() || NewItem.IsEmpty())
+	{
+		return false;
+	}
+
+	InitializeSlotArrays();
 
 	UcybmineItemData* StaticData = GetItemData(NewItem.ItemID);
 	if (!StaticData) return false;
@@ -173,44 +295,52 @@ bool UcybmineInventoryComponent::AddItem(const FInventoryItem& NewItem)
 	int32 Remaining = NewItem.Quantity;
 	bool bModifiedActiveSlot = false;
 
-	// 1. Impila solo se MaxStack > 1
+	// 1. Impila solo se MaxStack > 1 e marca SOLO gli slot modificati come Dirty
 	if (MaxStack > 1)
 	{
-		for (int32 i = 0; i < StorageSlots.Num(); ++i)
+		for (int32 i = 0; i < StorageList.Entries.Num(); ++i)
 		{
-			FInventoryItem& Slot = StorageSlots[i];
-			if (!Slot.IsEmpty() && Slot.ItemID == NewItem.ItemID && Slot.Quantity < MaxStack)
+			FCybmineInventorySlotEntry& Entry = StorageList.Entries[i];
+			if (!Entry.Item.IsEmpty() && Entry.Item.ItemID == NewItem.ItemID && Entry.Item.Quantity < MaxStack)
 			{
-				const int32 Space = MaxStack - Slot.Quantity;
+				const int32 Space = MaxStack - Entry.Item.Quantity;
 				const int32 ToAdd = FMath::Min(Space, Remaining);
-				Slot.Quantity += ToAdd;
+				Entry.Item.Quantity += ToAdd;
 				Remaining -= ToAdd;
 
-				if (i == SelectedHotbarSlot) bModifiedActiveSlot = true;
+				// DELTA SERIALIZATION: invia in rete solo questo singolo slot
+				StorageList.MarkItemDirty(Entry);
+				OnInventorySlotUpdated.Broadcast(Entry.SlotIndex, Entry.Item, false);
+
+				if (Entry.SlotIndex == SelectedHotbarSlot) bModifiedActiveSlot = true;
 				if (Remaining <= 0) break;
 			}
 		}
 	}
 
-	// 2. Riempi il primo slot vuoto disponibile (partendo dalla hotbar 0..5)
+	// 2. Riempi il primo slot vuoto disponibile e marcalo come Dirty
 	if (Remaining > 0)
 	{
-		for (int32 i = 0; i < StorageSlots.Num(); ++i)
+		for (int32 i = 0; i < StorageList.Entries.Num(); ++i)
 		{
-			FInventoryItem& Slot = StorageSlots[i];
-			if (Slot.IsEmpty())
+			FCybmineInventorySlotEntry& Entry = StorageList.Entries[i];
+			if (Entry.Item.IsEmpty())
 			{
-				Slot = NewItem;
-				Slot.Quantity = FMath::Min(MaxStack, Remaining);
+				Entry.Item = NewItem;
+				Entry.Item.Quantity = FMath::Min(MaxStack, Remaining);
 
-				if (MaxStack <= 1 && !Slot.UniqueInstanceID.IsValid())
+				if (MaxStack <= 1 && !Entry.Item.UniqueInstanceID.IsValid())
 				{
-					Slot.UniqueInstanceID = FGuid::NewGuid();
+					Entry.Item.UniqueInstanceID = FGuid::NewGuid();
 				}
 
-				Remaining -= Slot.Quantity;
-				if (i == SelectedHotbarSlot) bModifiedActiveSlot = true;
+				Remaining -= Entry.Item.Quantity;
 
+				// DELTA SERIALIZATION: invia in rete solo questo singolo slot
+				StorageList.MarkItemDirty(Entry);
+				OnInventorySlotUpdated.Broadcast(Entry.SlotIndex, Entry.Item, false);
+
+				if (Entry.SlotIndex == SelectedHotbarSlot) bModifiedActiveSlot = true;
 				if (Remaining <= 0) break;
 			}
 		}
@@ -226,14 +356,33 @@ bool UcybmineInventoryComponent::AddItem(const FInventoryItem& NewItem)
 
 void UcybmineInventoryComponent::SwapStorageSlots(int32 IndexA, int32 IndexB)
 {
-	if (!StorageSlots.IsValidIndex(IndexA) || !StorageSlots.IsValidIndex(IndexB) || IndexA == IndexB)
+	if (IndexA == IndexB || IndexA < 0 || IndexB < 0 ||
+		IndexA >= CybmineConstants::TotalStorageSlotCount || IndexB >= CybmineConstants::TotalStorageSlotCount)
 	{
 		return;
 	}
 
-	FInventoryItem Temp = StorageSlots[IndexA];
-	StorageSlots[IndexA] = StorageSlots[IndexB];
-	StorageSlots[IndexB] = Temp;
+	if (GetOwner() && !GetOwner()->HasAuthority())
+	{
+		Server_SwapStorageSlots(IndexA, IndexB);
+		return;
+	}
+
+	if (!StorageList.Entries.IsValidIndex(IndexA) || !StorageList.Entries.IsValidIndex(IndexB))
+	{
+		return;
+	}
+
+	FInventoryItem Temp = StorageList.Entries[IndexA].Item;
+	StorageList.Entries[IndexA].Item = StorageList.Entries[IndexB].Item;
+	StorageList.Entries[IndexB].Item = Temp;
+
+	// Marca SOLO i due slot coinvolti nello scambio
+	StorageList.MarkItemDirty(StorageList.Entries[IndexA]);
+	StorageList.MarkItemDirty(StorageList.Entries[IndexB]);
+
+	OnInventorySlotUpdated.Broadcast(IndexA, StorageList.Entries[IndexA].Item, false);
+	OnInventorySlotUpdated.Broadcast(IndexB, StorageList.Entries[IndexB].Item, false);
 
 	if (IndexA == SelectedHotbarSlot || IndexB == SelectedHotbarSlot)
 	{
@@ -241,14 +390,31 @@ void UcybmineInventoryComponent::SwapStorageSlots(int32 IndexA, int32 IndexB)
 	}
 }
 
+void UcybmineInventoryComponent::Server_SwapStorageSlots_Implementation(int32 IndexA, int32 IndexB)
+{
+	SwapStorageSlots(IndexA, IndexB);
+}
+
 bool UcybmineInventoryComponent::EquipArmorFromStorage(int32 StorageIndex, int32 ArmorIndex)
 {
-	if (!StorageSlots.IsValidIndex(StorageIndex) || !ArmorSlots.IsValidIndex(ArmorIndex))
+	if (StorageIndex < 0 || StorageIndex >= CybmineConstants::TotalStorageSlotCount ||
+		ArmorIndex < 0 || ArmorIndex >= CybmineConstants::ArmorSlotCount)
 	{
 		return false;
 	}
 
-	const FInventoryItem& Item = StorageSlots[StorageIndex];
+	if (GetOwner() && !GetOwner()->HasAuthority())
+	{
+		Server_EquipArmorFromStorage(StorageIndex, ArmorIndex);
+		return true;
+	}
+
+	if (!StorageList.Entries.IsValidIndex(StorageIndex) || !ArmorList.Entries.IsValidIndex(ArmorIndex))
+	{
+		return false;
+	}
+
+	const FInventoryItem& Item = StorageList.Entries[StorageIndex].Item;
 	if (!Item.IsEmpty())
 	{
 		UcybmineItemData* StaticData = GetItemData(Item.ItemID);
@@ -266,9 +432,16 @@ bool UcybmineInventoryComponent::EquipArmorFromStorage(int32 StorageIndex, int32
 		}
 	}
 
-	FInventoryItem Temp = ArmorSlots[ArmorIndex];
-	ArmorSlots[ArmorIndex] = StorageSlots[StorageIndex];
-	StorageSlots[StorageIndex] = Temp;
+	FInventoryItem Temp = ArmorList.Entries[ArmorIndex].Item;
+	ArmorList.Entries[ArmorIndex].Item = StorageList.Entries[StorageIndex].Item;
+	StorageList.Entries[StorageIndex].Item = Temp;
+
+	// Marca SOLO lo slot dello zaino e lo slot armatura modificati
+	StorageList.MarkItemDirty(StorageList.Entries[StorageIndex]);
+	ArmorList.MarkItemDirty(ArmorList.Entries[ArmorIndex]);
+
+	OnInventorySlotUpdated.Broadcast(StorageIndex, StorageList.Entries[StorageIndex].Item, false);
+	OnInventorySlotUpdated.Broadcast(ArmorIndex, ArmorList.Entries[ArmorIndex].Item, true);
 
 	if (StorageIndex == SelectedHotbarSlot)
 	{
@@ -276,4 +449,9 @@ bool UcybmineInventoryComponent::EquipArmorFromStorage(int32 StorageIndex, int32
 	}
 
 	return true;
+}
+
+void UcybmineInventoryComponent::Server_EquipArmorFromStorage_Implementation(int32 StorageIndex, int32 ArmorIndex)
+{
+	EquipArmorFromStorage(StorageIndex, ArmorIndex);
 }
