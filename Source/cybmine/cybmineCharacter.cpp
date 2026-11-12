@@ -1,23 +1,27 @@
 #include "cybmineCharacter.h"
+#include "cybmineInventoryComponent.h"
+#include "cybmineCombatComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/PointLightComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "Animation/AnimInstance.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "InputCoreTypes.h"
-#include "Engine/DamageEvents.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Animation/AnimSequence.h"
 
 AcybmineCharacter::AcybmineCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// Rotazione del Controller agganciata alla visuale FPS
-	bUseControllerRotationPitch = true;
+	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
 
@@ -29,80 +33,197 @@ AcybmineCharacter::AcybmineCharacter()
 	GetCharacterMovement()->FallingLateralFriction = 0.3f;
 	GetCharacterMovement()->AirControl = 0.4f;
 
-	// Telecamera pura in prima persona posizionata ad altezza occhi
+	// Componenti modulari
+	InventoryComponent = CreateDefaultSubobject<UcybmineInventoryComponent>(TEXT("InventoryComponent"));
+	CombatComponent = CreateDefaultSubobject<UcybmineCombatComponent>(TEXT("CombatComponent"));
+
+	// Telecamera FPS
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
-	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 65.0f));
+	FirstPersonCamera->SetRelativeLocation(FVector(16.0f, 0.0f, 66.0f));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
-	// Caricamento mesh ed animazioni in C++
+	// Mesh e Animazioni
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannyMesh(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny.SKM_Manny"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannySimpleMesh(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuinnMesh(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn.SKM_Quinn"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> EngineFallbackMesh(TEXT("/Engine/EngineMeshes/SkeletalCube.SkeletalCube"));
+
+	if (MannyMesh.Succeeded()) GetMesh()->SetSkeletalMesh(MannyMesh.Object);
+	else if (MannySimpleMesh.Succeeded()) GetMesh()->SetSkeletalMesh(MannySimpleMesh.Object);
+	else if (QuinnMesh.Succeeded()) GetMesh()->SetSkeletalMesh(QuinnMesh.Object);
+	else if (EngineFallbackMesh.Succeeded()) GetMesh()->SetSkeletalMesh(EngineFallbackMesh.Object);
+
+	static ConstructorHelpers::FClassFinder<UAnimInstance> MannySubAnim(TEXT("/Game/Characters/Mannequins/Animations/Manny/ABP_Manny.ABP_Manny_C"));
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnim(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny.ABP_Manny_C"));
+	static ConstructorHelpers::FClassFinder<UAnimInstance> UnarmedAnim(TEXT("/Game/Characters/Mannequins/Animations/ABP_Unarmed.ABP_Unarmed_C"));
 
-	if (MannyMesh.Succeeded())
-	{
-		GetMesh()->SetSkeletalMesh(MannyMesh.Object);
-	}
+	if (MannySubAnim.Succeeded()) GetMesh()->SetAnimInstanceClass(MannySubAnim.Class);
+	else if (MannyAnim.Succeeded()) GetMesh()->SetAnimInstanceClass(MannyAnim.Class);
+	else if (UnarmedAnim.Succeeded()) GetMesh()->SetAnimInstanceClass(UnarmedAnim.Class);
 
-	if (MannyAnim.Succeeded())
-	{
-		GetMesh()->SetAnimInstanceClass(MannyAnim.Class);
-	}
-
-	// Posizionamento della mesh per avere braccia e corpo allineati
 	GetMesh()->SetupAttachment(GetCapsuleComponent());
-	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
+	GetMesh()->SetRelativeLocation(FVector(-6.0f, 0.0f, -90.0f));
 	GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-
-	// Visibile al proprietario in prima persona
 	GetMesh()->SetOwnerNoSee(false);
 	GetMesh()->bCastHiddenShadow = true;
 
-	// --- SETUP ANTEPRIMA 3D PER INVENTARIO ---
+	// Anteprima 3D per inventario
 	PreviewSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("PreviewSpringArm"));
 	PreviewSpringArm->SetupAttachment(GetCapsuleComponent());
 	PreviewSpringArm->SetRelativeLocation(FVector(0.0f, 0.0f, -5.0f));
-	PreviewSpringArm->TargetArmLength = 210.0f;
+	PreviewSpringArm->TargetArmLength = 220.0f;
 	PreviewSpringArm->bDoCollisionTest = false;
 	PreviewSpringArm->bUsePawnControlRotation = false;
 	PreviewSpringArm->bInheritPitch = false;
 	PreviewSpringArm->bInheritRoll = false;
 	PreviewSpringArm->bInheritYaw = true;
-	// 180 gradi guarda frontalmente il personaggio
 	PreviewSpringArm->SetRelativeRotation(FRotator(-5.0f, 180.0f, 0.0f));
 
 	PreviewCaptureComponent = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("PreviewCaptureComponent"));
 	PreviewCaptureComponent->SetupAttachment(PreviewSpringArm, USpringArmComponent::SocketName);
 	PreviewCaptureComponent->FOVAngle = 45.0f;
-	// Isola SOLO questo personaggio (niente sfondo del mondo)
 	PreviewCaptureComponent->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-	PreviewCaptureComponent->CaptureSource = ESceneCaptureSource::SCS_SceneColorHDR;
-	// Attivo solo quando l'inventario è aperto per risparmiare prestazioni
+	PreviewCaptureComponent->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 	PreviewCaptureComponent->bCaptureEveryFrame = false;
 	PreviewCaptureComponent->bCaptureOnMovement = false;
 
-	bIsSprinting = false;
-	bIsInventoryOpen = false;
+	PreviewLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("PreviewLight"));
+	PreviewLight->SetupAttachment(PreviewSpringArm, USpringArmComponent::SocketName);
+	PreviewLight->SetRelativeLocation(FVector(40.0f, 40.0f, 50.0f));
+	PreviewLight->SetIntensity(5000.0f);
+	PreviewLight->SetAttenuationRadius(500.0f);
+	PreviewLight->SetCastShadows(false);
+	PreviewLight->SetVisibility(false);
+}
 
-	bWDown = false;
-	bSDown = false;
-	bDDown = false;
-	bADown = false;
+void AcybmineCharacter::AutoAssignAnimBlueprint()
+{
+	if (!GetMesh() || !GetMesh()->GetSkeletalMeshAsset())
+	{
+		return;
+	}
 
-	LastAttackTime = -10.0f;
-	LastDamageTakenTime = -10.0f;
-	LastWReleaseTime = -10.0f;
+	// Passa alla modalità SingleNode controllata al 100% dal nostro C++
+	GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 
-	CurrentHealth = MaxHealth;
+	// Scansiona /Game per trovare le AnimSequence del manichino (Idle, Walk, Run, Jump)
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	FARFilter Filter;
+	Filter.ClassPaths.Add(UAnimSequence::StaticClass()->GetClassPathName());
+	Filter.PackagePaths.Add(FName("/Game"));
+	Filter.bRecursivePaths = true;
+
+	TArray<FAssetData> AssetList;
+	AssetRegistryModule.Get().GetAssets(Filter, AssetList);
+
+	USkeleton* TargetSkeleton = GetMesh()->GetSkeletalMeshAsset()->GetSkeleton();
+
+	for (const FAssetData& Asset : AssetList)
+	{
+		if (UAnimSequence* Seq = Cast<UAnimSequence>(Asset.GetAsset()))
+		{
+			if (TargetSkeleton && Seq->GetSkeleton() != TargetSkeleton)
+			{
+				continue;
+			}
+
+			const FString Name = Asset.AssetName.ToString();
+			if (!AnimIdle && Name.Contains(TEXT("Idle")) && !Name.Contains(TEXT("Combat")))
+			{
+				AnimIdle = Seq;
+			}
+			else if (!AnimWalk && Name.Contains(TEXT("Walk")) && (Name.Contains(TEXT("Fwd")) || Name.Contains(TEXT("Forward")) || !Name.Contains(TEXT("Bwd"))))
+			{
+				AnimWalk = Seq;
+			}
+			else if (!AnimRun && Name.Contains(TEXT("Run")) && (Name.Contains(TEXT("Fwd")) || Name.Contains(TEXT("Forward")) || !Name.Contains(TEXT("Bwd"))))
+			{
+				AnimRun = Seq;
+			}
+			else if (!AnimJump && (Name.Contains(TEXT("Jump")) || Name.Contains(TEXT("Fall"))))
+			{
+				AnimJump = Seq;
+			}
+		}
+	}
+
+	// Fallback se mancasse Walk o Run
+	if (!AnimWalk) AnimWalk = AnimRun;
+	if (!AnimRun) AnimRun = AnimWalk;
+
+	// Avvia subito l'Idle
+	if (AnimIdle)
+	{
+		GetMesh()->PlayAnimation(AnimIdle, true);
+		CurrentPlayingAnim = AnimIdle;
+	}
+}
+
+void AcybmineCharacter::UpdateCharacterAnimation()
+{
+	if (!GetMesh() || GetMesh()->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+	{
+		return;
+	}
+
+	UAnimSequence* DesiredAnim = AnimIdle;
+
+	if (GetCharacterMovement()->IsFalling())
+	{
+		if (AnimJump) DesiredAnim = AnimJump;
+	}
+	else
+	{
+		const float Speed2D = GetVelocity().Size2D();
+		if (Speed2D > 20.0f)
+		{
+			DesiredAnim = (bIsSprinting && AnimRun) ? AnimRun : AnimWalk;
+		}
+	}
+
+	if (DesiredAnim && DesiredAnim != CurrentPlayingAnim)
+	{
+		const bool bLoop = (DesiredAnim != AnimJump);
+		GetMesh()->PlayAnimation(DesiredAnim, bLoop);
+		CurrentPlayingAnim = DesiredAnim;
+	}
+}
+
+void AcybmineCharacter::ApplyAvatarColor(const FLinearColor& NewColor)
+{
+	if (!GetMesh()) return;
+
+	UMaterialInterface* BaseShapeMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+
+	const int32 NumMaterials = GetMesh()->GetNumMaterials();
+	for (int32 i = 0; i < NumMaterials; ++i)
+	{
+		if (BaseShapeMat)
+		{
+			if (UMaterialInstanceDynamic* DynMat = UMaterialInstanceDynamic::Create(BaseShapeMat, this))
+			{
+				DynMat->SetVectorParameterValue(FName("Color"), NewColor);
+				GetMesh()->SetMaterial(i, DynMat);
+			}
+		}
+		else if (UMaterialInstanceDynamic* DynMat = GetMesh()->CreateAndSetMaterialInstanceDynamic(i))
+		{
+			DynMat->SetVectorParameterValue(FName("Tint"), NewColor);
+			DynMat->SetVectorParameterValue(FName("BaseColor"), NewColor);
+			DynMat->SetVectorParameterValue(FName("Color"), NewColor);
+		}
+	}
 }
 
 void AcybmineCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	CurrentHealth = MaxHealth;
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 
-	// Creazione dinamica della RenderTarget per l'anteprima nell'inventario
+	AutoAssignAnimBlueprint();
+	ApplyAvatarColor(AvatarTintColor);
+
 	PreviewRenderTarget = NewObject<UTextureRenderTarget2D>(this);
 	PreviewRenderTarget->InitAutoFormat(256, 384);
 	PreviewRenderTarget->ClearColor = FLinearColor(0.05f, 0.05f, 0.05f, 1.0f);
@@ -112,6 +233,7 @@ void AcybmineCharacter::BeginPlay()
 	{
 		PreviewCaptureComponent->TextureTarget = PreviewRenderTarget;
 		PreviewCaptureComponent->ShowOnlyActors.Add(this);
+		PreviewCaptureComponent->ShowOnlyComponents.Add(GetMesh());
 	}
 }
 
@@ -125,144 +247,141 @@ void AcybmineCharacter::Tick(float DeltaTime)
 		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 	}
 
-	if (Controller != nullptr && !bIsInventoryOpen)
+	if (Controller != nullptr && !IsInventoryOpen())
 	{
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-		float ForwardValue = 0.0f;
-		if (bWDown) ForwardValue += 1.0f;
-		if (bSDown) ForwardValue -= 1.0f;
-
+		const float ForwardValue = (bWDown ? 1.0f : 0.0f) - (bSDown ? 1.0f : 0.0f);
 		if (ForwardValue != 0.0f)
 		{
-			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-			AddMovementInput(ForwardDirection, ForwardValue);
+			AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X), ForwardValue);
 		}
 
-		float RightValue = 0.0f;
-		if (bDDown) RightValue += 1.0f;
-		if (bADown) RightValue -= 1.0f;
-
+		const float RightValue = (bDDown ? 1.0f : 0.0f) - (bADown ? 1.0f : 0.0f);
 		if (RightValue != 0.0f)
 		{
-			const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-			AddMovementInput(RightDirection, RightValue);
+			AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y), RightValue);
 		}
 	}
+
+	if (PunchAnimAlpha > 0.0f)
+	{
+		PunchAnimAlpha = FMath::Max(0.0f, PunchAnimAlpha - (DeltaTime * 5.0f));
+	}
+
+	if (FirstPersonCamera)
+	{
+		const float Swing = FMath::Sin(PunchAnimAlpha * PI);
+		FirstPersonCamera->SetRelativeLocation(FVector(16.0f + (Swing * 4.0f), Swing * -2.0f, 66.0f - (Swing * 2.5f)));
+	}
+	UpdateCharacterAnimation();
 }
 
 void AcybmineCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
-
 	if (!PlayerInputComponent) return;
 
-	// Apertura / Chiusura Inventario (I apre/chiude, Esc e Tab chiudono)
+	// Inventario
 	PlayerInputComponent->BindKey(EKeys::I, IE_Pressed, this, &AcybmineCharacter::ToggleInventory);
 	PlayerInputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &AcybmineCharacter::CloseInventory);
 	PlayerInputComponent->BindKey(EKeys::Tab, IE_Pressed, this, &AcybmineCharacter::CloseInventory);
 
-	// Attacco
-	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AcybmineCharacter::PerformAttack);
+	// Hotbar
+	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &AcybmineCharacter::SelectSlot1);
+	PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AcybmineCharacter::SelectSlot2);
+	PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AcybmineCharacter::SelectSlot3);
+	PlayerInputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AcybmineCharacter::SelectSlot4);
+	PlayerInputComponent->BindKey(EKeys::Five, IE_Pressed, this, &AcybmineCharacter::SelectSlot5);
+	PlayerInputComponent->BindKey(EKeys::Six, IE_Pressed, this, &AcybmineCharacter::SelectSlot6);
+	PlayerInputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &AcybmineCharacter::PrevHotbarSlot);
+	PlayerInputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &AcybmineCharacter::NextHotbarSlot);
 
-	// Salto
+	// Combattimento & Movimento
+	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AcybmineCharacter::PerformAttack);
 	PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &AcybmineCharacter::DoJumpStart);
 	PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Released, this, &AcybmineCharacter::DoJumpEnd);
-
-	// Sprint
 	PlayerInputComponent->BindKey(EKeys::LeftControl, IE_Pressed, this, &AcybmineCharacter::ToggleSprint);
 	PlayerInputComponent->BindKey(EKeys::RightControl, IE_Pressed, this, &AcybmineCharacter::ToggleSprint);
 
-	// Movimento WASD
 	PlayerInputComponent->BindKey(EKeys::W, IE_Pressed, this, &AcybmineCharacter::OnWPressed);
 	PlayerInputComponent->BindKey(EKeys::W, IE_Released, this, &AcybmineCharacter::OnWReleased);
-
 	PlayerInputComponent->BindKey(EKeys::S, IE_Pressed, this, &AcybmineCharacter::OnSPressed);
 	PlayerInputComponent->BindKey(EKeys::S, IE_Released, this, &AcybmineCharacter::OnSReleased);
-
 	PlayerInputComponent->BindKey(EKeys::D, IE_Pressed, this, &AcybmineCharacter::OnDPressed);
 	PlayerInputComponent->BindKey(EKeys::D, IE_Released, this, &AcybmineCharacter::OnDReleased);
-
 	PlayerInputComponent->BindKey(EKeys::A, IE_Pressed, this, &AcybmineCharacter::OnAPressed);
 	PlayerInputComponent->BindKey(EKeys::A, IE_Released, this, &AcybmineCharacter::OnAReleased);
 
-	// Visuale Mouse
 	PlayerInputComponent->BindAxisKey(EKeys::MouseX, this, &AcybmineCharacter::LookRightDirect);
 	PlayerInputComponent->BindAxisKey(EKeys::MouseY, this, &AcybmineCharacter::LookUpDirect);
 }
 
+bool AcybmineCharacter::IsInventoryOpen() const
+{
+	return InventoryComponent && InventoryComponent->bIsInventoryOpen;
+}
+
 void AcybmineCharacter::ToggleInventory()
 {
-	bIsInventoryOpen = !bIsInventoryOpen;
+	if (!InventoryComponent) return;
 
-	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (PC)
+	InventoryComponent->bIsInventoryOpen = !InventoryComponent->bIsInventoryOpen;
+	const bool bOpen = InventoryComponent->bIsInventoryOpen;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		if (bIsInventoryOpen)
+		if (bOpen)
 		{
-			// Ferma eventuali movimenti in corso
 			bWDown = bSDown = bADown = bDDown = false;
 			bIsSprinting = false;
 			GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 
-			// Mostra il cursore e sblocca il mouse sullo schermo
 			PC->bShowMouseCursor = true;
 			FInputModeGameAndUI InputMode;
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			InputMode.SetHideCursorDuringCapture(false);
 			PC->SetInputMode(InputMode);
 
-			// Resetta la rotazione frontale dell'anteprima e avvia la cattura
-			if (PreviewSpringArm)
-			{
-				PreviewSpringArm->SetRelativeRotation(FRotator(-5.0f, 180.0f, 0.0f));
-			}
-			if (PreviewCaptureComponent)
-			{
-				PreviewCaptureComponent->bCaptureEveryFrame = true;
-			}
+			if (PreviewSpringArm) PreviewSpringArm->SetRelativeRotation(FRotator(-5.0f, 180.0f, 0.0f));
+			if (PreviewCaptureComponent) PreviewCaptureComponent->bCaptureEveryFrame = true;
+			if (PreviewLight) PreviewLight->SetVisibility(true);
 		}
 		else
 		{
-			// Nasconde il cursore e torna al controllo FPS puro
 			PC->bShowMouseCursor = false;
 			FInputModeGameOnly InputMode;
 			PC->SetInputMode(InputMode);
 
-			if (PreviewCaptureComponent)
-			{
-				PreviewCaptureComponent->bCaptureEveryFrame = false;
-			}
+			if (PreviewCaptureComponent) PreviewCaptureComponent->bCaptureEveryFrame = false;
+			if (PreviewLight) PreviewLight->SetVisibility(false);
 		}
 	}
 }
 
 void AcybmineCharacter::CloseInventory()
 {
-	if (bIsInventoryOpen)
+	if (IsInventoryOpen())
 	{
 		ToggleInventory();
 	}
 }
 
-void AcybmineCharacter::RotateCharacterPreview(float DeltaYaw)
-{
-	if (PreviewSpringArm)
-	{
-		FRotator CurrentRot = PreviewSpringArm->GetRelativeRotation();
-		CurrentRot.Yaw += DeltaYaw;
-		PreviewSpringArm->SetRelativeRotation(CurrentRot);
-	}
-}
+void AcybmineCharacter::SelectSlot1() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(0); }
+void AcybmineCharacter::SelectSlot2() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(1); }
+void AcybmineCharacter::SelectSlot3() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(2); }
+void AcybmineCharacter::SelectSlot4() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(3); }
+void AcybmineCharacter::SelectSlot5() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(4); }
+void AcybmineCharacter::SelectSlot6() { if (InventoryComponent) InventoryComponent->SelectHotbarSlot(5); }
+void AcybmineCharacter::NextHotbarSlot() { if (InventoryComponent) InventoryComponent->NextHotbarSlot(); }
+void AcybmineCharacter::PrevHotbarSlot() { if (InventoryComponent) InventoryComponent->PrevHotbarSlot(); }
 
 void AcybmineCharacter::OnWPressed()
 {
-	if (bIsInventoryOpen) return;
+	if (IsInventoryOpen()) return;
 	bWDown = true;
-	const float CurrentTime = GetWorld()->GetTimeSeconds();
-
-	if ((CurrentTime - LastWReleaseTime) <= DoubleTapWindow)
+	if ((GetWorld()->GetTimeSeconds() - LastWReleaseTime) <= DoubleTapWindow)
 	{
 		bIsSprinting = true;
 		GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
@@ -277,7 +396,7 @@ void AcybmineCharacter::OnWReleased()
 
 void AcybmineCharacter::OnSPressed()
 {
-	if (bIsInventoryOpen) return;
+	if (IsInventoryOpen()) return;
 	bSDown = true;
 	if (bIsSprinting)
 	{
@@ -286,36 +405,15 @@ void AcybmineCharacter::OnSPressed()
 	}
 }
 
-void AcybmineCharacter::OnSReleased()
-{
-	bSDown = false;
-}
-
-void AcybmineCharacter::OnDPressed()
-{
-	if (bIsInventoryOpen) return;
-	bDDown = true;
-}
-
-void AcybmineCharacter::OnDReleased()
-{
-	bDDown = false;
-}
-
-void AcybmineCharacter::OnAPressed()
-{
-	if (bIsInventoryOpen) return;
-	bADown = true;
-}
-
-void AcybmineCharacter::OnAReleased()
-{
-	bADown = false;
-}
+void AcybmineCharacter::OnSReleased() { bSDown = false; }
+void AcybmineCharacter::OnDPressed() { if (!IsInventoryOpen()) bDDown = true; }
+void AcybmineCharacter::OnDReleased() { bDDown = false; }
+void AcybmineCharacter::OnAPressed() { if (!IsInventoryOpen()) bADown = true; }
+void AcybmineCharacter::OnAReleased() { bADown = false; }
 
 void AcybmineCharacter::ToggleSprint()
 {
-	if (bIsInventoryOpen) return;
+	if (IsInventoryOpen()) return;
 	if (bIsSprinting)
 	{
 		bIsSprinting = false;
@@ -330,23 +428,17 @@ void AcybmineCharacter::ToggleSprint()
 
 void AcybmineCharacter::LookRightDirect(float Value)
 {
-	if (!bIsInventoryOpen)
-	{
-		AddControllerYawInput(Value);
-	}
+	if (!IsInventoryOpen()) AddControllerYawInput(Value);
 }
 
 void AcybmineCharacter::LookUpDirect(float Value)
 {
-	if (!bIsInventoryOpen)
-	{
-		AddControllerPitchInput(-Value);
-	}
+	if (!IsInventoryOpen()) AddControllerPitchInput(-Value);
 }
 
 void AcybmineCharacter::DoMove(float Forward, float Right)
 {
-	if (bIsInventoryOpen) return;
+	if (IsInventoryOpen()) return;
 	bWDown = (Forward > 0.1f);
 	bSDown = (Forward < -0.1f);
 	bDDown = (Right > 0.1f);
@@ -355,17 +447,14 @@ void AcybmineCharacter::DoMove(float Forward, float Right)
 
 void AcybmineCharacter::DoLook(float Yaw, float Pitch)
 {
-	if (bIsInventoryOpen) return;
+	if (IsInventoryOpen()) return;
 	AddControllerYawInput(Yaw);
 	AddControllerPitchInput(Pitch);
 }
 
 void AcybmineCharacter::DoJumpStart()
 {
-	if (!bIsInventoryOpen)
-	{
-		Jump();
-	}
+	if (!IsInventoryOpen()) Jump();
 }
 
 void AcybmineCharacter::DoJumpEnd()
@@ -373,100 +462,16 @@ void AcybmineCharacter::DoJumpEnd()
 	StopJumping();
 }
 
-float AcybmineCharacter::GetAttackCooldownProgress() const
-{
-	if (AttackSpeed <= 0.0f) return 1.0f;
-
-	const float TimeSinceLastAttack = GetWorld()->GetTimeSeconds() - LastAttackTime;
-	const float TimeRequired = 1.0f / AttackSpeed;
-	return FMath::Clamp(TimeSinceLastAttack / TimeRequired, 0.0f, 1.0f);
-}
-
-bool AcybmineCharacter::IsInvulnerable() const
-{
-	return (GetWorld()->GetTimeSeconds() - LastDamageTakenTime) < InvulnerabilityDuration;
-}
-
 float AcybmineCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	if (IsInvulnerable() || CurrentHealth <= 0.0f)
-	{
-		return 0.0f;
-	}
-
 	const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
-	CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, MaxHealth);
-	LastDamageTakenTime = GetWorld()->GetTimeSeconds();
-
-	if (CurrentHealth <= 0.0f)
-	{
-		Destroy();
-	}
-
-	return ActualDamage;
+	return CombatComponent ? CombatComponent->HandleIncomingDamage(ActualDamage, DamageEvent, EventInstigator, DamageCauser) : 0.0f;
 }
 
 void AcybmineCharacter::PerformAttack()
 {
-	// Non attaccare mentre clicchi nell'inventario!
-	if (bIsInventoryOpen)
-	{
-		return;
-	}
+	if (IsInventoryOpen() || !CombatComponent) return;
 
-	const float CooldownProgress = GetAttackCooldownProgress();
-	LastAttackTime = GetWorld()->GetTimeSeconds();
-
-	const FVector TraceStart = FirstPersonCamera->GetComponentLocation();
-	const FVector ForwardVector = FirstPersonCamera->GetForwardVector();
-	const FVector TraceEnd = TraceStart + (ForwardVector * AttackRange);
-
-	FHitResult HitResult;
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(this);
-
-	const bool bHit = GetWorld()->LineTraceSingleByChannel(
-		HitResult,
-		TraceStart,
-		TraceEnd,
-		ECC_Pawn,
-		QueryParams
-	);
-
-	if (bHit && HitResult.GetActor())
-	{
-		AcybmineCharacter* Target = Cast<AcybmineCharacter>(HitResult.GetActor());
-
-		if (Target && !Target->IsInvulnerable() && Target->CurrentHealth > 0.0f)
-		{
-			const float DamageMultiplier = 0.2f + 0.8f * (CooldownProgress * CooldownProgress);
-			const float FinalDamage = BaseDamage * DamageMultiplier;
-
-			FDamageEvent DamageEvent;
-			Target->TakeDamage(FinalDamage, DamageEvent, GetController(), this);
-
-			if (Target->IsValidLowLevel() && !Target->IsPendingKillPending())
-			{
-				FVector KnockbackDir = ForwardVector;
-				KnockbackDir.Z = 0.0f;
-				KnockbackDir.Normalize();
-
-				const float EffectiveKnockback = HorizontalKnockback * FMath::Clamp(CooldownProgress, 0.6f, 1.0f);
-				const float EffectiveVertical = VerticalKnockback * FMath::Clamp(CooldownProgress, 0.6f, 1.0f);
-
-				FVector TargetVelocity = Target->GetCharacterMovement()->Velocity;
-				TargetVelocity.Z = 0.0f;
-
-				FVector FinalVelocity = TargetVelocity + (KnockbackDir * EffectiveKnockback) + FVector(0.0f, 0.0f, EffectiveVertical);
-
-				Target->LaunchCharacter(FinalVelocity, true, true);
-			}
-
-			DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 15.0f, 12, FColor::Green, false, 0.5f);
-		}
-	}
-	else
-	{
-		DrawDebugLine(GetWorld(), TraceStart, TraceEnd, FColor::Red, false, 0.2f);
-	}
+	PunchAnimAlpha = 1.0f;
+	CombatComponent->PerformAttack(FirstPersonCamera);
 }

@@ -18,7 +18,8 @@ public class cybmine : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"AssetRegistry"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

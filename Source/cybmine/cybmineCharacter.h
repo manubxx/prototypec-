@@ -8,6 +8,9 @@ class UCameraComponent;
 class USpringArmComponent;
 class USceneCaptureComponent2D;
 class UTextureRenderTarget2D;
+class UPointLightComponent;
+class UcybmineInventoryComponent;
+class UcybmineCombatComponent;
 
 UCLASS()
 class CYBMINE_API AcybmineCharacter : public ACharacter
@@ -17,11 +20,24 @@ class CYBMINE_API AcybmineCharacter : public ACharacter
 public:
 	AcybmineCharacter();
 
-	// Telecamera pura in prima persona
+	// --- COMPONENTI PRINCIPALI ---
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UcybmineInventoryComponent* InventoryComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UcybmineCombatComponent* CombatComponent;
+
+	// --- ASPETTO AVATAR ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+	FLinearColor AvatarTintColor = FLinearColor(0.05f, 0.25f, 0.95f, 1.0f);
+
+	UFUNCTION(BlueprintCallable, Category = "Appearance")
+	void ApplyAvatarColor(const FLinearColor& NewColor);
+
+	// --- TELECAMERA & ANTEPRIMA 3D INVENTARIO ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	UCameraComponent* FirstPersonCamera;
 
-	// --- COMPONENTI ANTEPRIMA PERSONAGGIO (INVENTARIO) ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
 	USpringArmComponent* PreviewSpringArm;
 
@@ -29,36 +45,19 @@ public:
 	USceneCaptureComponent2D* PreviewCaptureComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
+	UPointLightComponent* PreviewLight;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
 	UTextureRenderTarget2D* PreviewRenderTarget;
 
-	// --- STATO INVENTARIO ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-	bool bIsInventoryOpen = false;
-
+	// --- CONTROLLO INVENTARIO ---
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void ToggleInventory();
 
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void CloseInventory();
 
-	// Ruota l'anteprima del personaggio nell'inventario
-	void RotateCharacterPreview(float DeltaYaw);
-
-	// --- STATISTICHE PUBBLICHE ACCESSIBILI DALL'HUD ---
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-	float MaxHealth = 20.0f;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats")
-	float CurrentHealth;
-
-	UFUNCTION(BlueprintPure, Category = "Stats")
-	float GetHealthRatio() const { return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f; }
-
-	UFUNCTION(BlueprintPure, Category = "Combat")
-	float GetAttackCooldownProgress() const;
-
-	UFUNCTION(BlueprintPure, Category = "Combat")
-	bool IsInvulnerable() const;
+	bool IsInventoryOpen() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -66,29 +65,27 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
-	// --- MINECRAFT I-FRAMES (10 Tick = 0.5s) ---
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float InvulnerabilityDuration = 0.5f;
+	void AutoAssignAnimBlueprint();
 
-	float LastDamageTakenTime;
+	// --- ANIMAZIONI DIRETTE 100% C++ ---
+	UPROPERTY()
+	class UAnimSequence* AnimIdle = nullptr;
 
-	// --- MINECRAFT COMBAT ---
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float AttackRange = 300.0f;
+	UPROPERTY()
+	class UAnimSequence* AnimWalk = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float BaseDamage = 7.0f;
+	UPROPERTY()
+	class UAnimSequence* AnimRun = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float AttackSpeed = 1.6f;
+	UPROPERTY()
+	class UAnimSequence* AnimJump = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float HorizontalKnockback = 650.0f;
+	UPROPERTY()
+	class UAnimSequence* CurrentPlayingAnim = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-	float VerticalKnockback = 320.0f;
+	void UpdateCharacterAnimation();
 
-	float LastAttackTime;
+
 
 	// --- MOVIMENTO E SPRINT ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
@@ -98,15 +95,16 @@ protected:
 	float SprintSpeed = 560.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
-	bool bIsSprinting;
+	bool bIsSprinting = false;
 
-	bool bWDown;
-	bool bSDown;
-	bool bDDown;
-	bool bADown;
+	bool bWDown = false;
+	bool bSDown = false;
+	bool bDDown = false;
+	bool bADown = false;
 
-	float LastWReleaseTime;
+	float LastWReleaseTime = -10.0f;
 	const float DoubleTapWindow = 0.25f;
+	float PunchAnimAlpha = 0.0f;
 
 	void OnWPressed();
 	void OnWReleased();
@@ -116,10 +114,19 @@ protected:
 	void OnDReleased();
 	void OnAPressed();
 	void OnAReleased();
-
 	void ToggleSprint();
+
 	void LookUpDirect(float Value);
 	void LookRightDirect(float Value);
+
+	void SelectSlot1();
+	void SelectSlot2();
+	void SelectSlot3();
+	void SelectSlot4();
+	void SelectSlot5();
+	void SelectSlot6();
+	void NextHotbarSlot();
+	void PrevHotbarSlot();
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Input")
