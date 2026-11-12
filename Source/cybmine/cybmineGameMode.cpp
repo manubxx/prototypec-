@@ -1,8 +1,9 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "cybmineGameMode.h"
+#include "cybmineCharacter.h"
+#include "cybmineHUD.h"
 
 AcybmineGameMode::AcybmineGameMode()
 {
-	// stub
+	DefaultPawnClass = AcybmineCharacter::StaticClass();
+	HUDClass = AcybmineHUD::StaticClass();
 }

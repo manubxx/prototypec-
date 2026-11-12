@@ -1,96 +1,138 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "Logging/LogMacros.h"
 #include "cybmineCharacter.generated.h"
 
-class USpringArmComponent;
 class UCameraComponent;
-class UInputAction;
-struct FInputActionValue;
+class USpringArmComponent;
+class USceneCaptureComponent2D;
+class UTextureRenderTarget2D;
 
-DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
-
-/**
- *  A simple player-controllable third person character
- *  Implements a controllable orbiting camera
- */
-UCLASS(abstract)
-class AcybmineCharacter : public ACharacter
+UCLASS()
+class CYBMINE_API AcybmineCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
-	/** Camera boom positioning the camera behind the character */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
-	USpringArmComponent* CameraBoom;
-
-	/** Follow camera */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
-	UCameraComponent* FollowCamera;
-	
-protected:
-
-	/** Jump Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
-	UInputAction* JumpAction;
-
-	/** Move Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
-	UInputAction* MoveAction;
-
-	/** Look Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
-	UInputAction* LookAction;
-
-	/** Mouse Look Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
-	UInputAction* MouseLookAction;
-
 public:
+	AcybmineCharacter();
 
-	/** Constructor */
-	AcybmineCharacter();	
+	// Telecamera pura in prima persona
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	UCameraComponent* FirstPersonCamera;
+
+	// --- COMPONENTI ANTEPRIMA PERSONAGGIO (INVENTARIO) ---
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
+	USpringArmComponent* PreviewSpringArm;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
+	USceneCaptureComponent2D* PreviewCaptureComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "InventoryPreview")
+	UTextureRenderTarget2D* PreviewRenderTarget;
+
+	// --- STATO INVENTARIO ---
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	bool bIsInventoryOpen = false;
+
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void ToggleInventory();
+
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void CloseInventory();
+
+	// Ruota l'anteprima del personaggio nell'inventario
+	void RotateCharacterPreview(float DeltaYaw);
+
+	// --- STATISTICHE PUBBLICHE ACCESSIBILI DALL'HUD ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+	float MaxHealth = 20.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats")
+	float CurrentHealth;
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	float GetHealthRatio() const { return (MaxHealth > 0.0f) ? (CurrentHealth / MaxHealth) : 0.0f; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetAttackCooldownProgress() const;
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsInvulnerable() const;
 
 protected:
-
-	/** Initialize input action bindings */
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
-protected:
+	// --- MINECRAFT I-FRAMES (10 Tick = 0.5s) ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float InvulnerabilityDuration = 0.5f;
 
-	/** Called for movement input */
-	void Move(const FInputActionValue& Value);
+	float LastDamageTakenTime;
 
-	/** Called for looking input */
-	void Look(const FInputActionValue& Value);
+	// --- MINECRAFT COMBAT ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float AttackRange = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float BaseDamage = 7.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float AttackSpeed = 1.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float HorizontalKnockback = 650.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float VerticalKnockback = 320.0f;
+
+	float LastAttackTime;
+
+	// --- MOVIMENTO E SPRINT ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float WalkSpeed = 430.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float SprintSpeed = 560.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+	bool bIsSprinting;
+
+	bool bWDown;
+	bool bSDown;
+	bool bDDown;
+	bool bADown;
+
+	float LastWReleaseTime;
+	const float DoubleTapWindow = 0.25f;
+
+	void OnWPressed();
+	void OnWReleased();
+	void OnSPressed();
+	void OnSReleased();
+	void OnDPressed();
+	void OnDReleased();
+	void OnAPressed();
+	void OnAReleased();
+
+	void ToggleSprint();
+	void LookUpDirect(float Value);
+	void LookRightDirect(float Value);
 
 public:
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void DoMove(float Forward, float Right);
 
-	/** Handles move inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoMove(float Right, float Forward);
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void DoLook(float Yaw, float Pitch);
 
-	/** Handles look inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoLook(float Yaw, float Pitch);
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void DoJumpStart();
 
-	/** Handles jump pressed inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoJumpStart();
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void DoJumpEnd();
 
-	/** Handles jump pressed inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoJumpEnd();
-
-public:
-
-	/** Returns CameraBoom subobject **/
-	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
-
-	/** Returns FollowCamera subobject **/
-	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	void PerformAttack();
 };
-
