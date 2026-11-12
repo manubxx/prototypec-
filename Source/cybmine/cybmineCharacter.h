@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Engine/StreamableManager.h"
+#include "cybmineTypes.h"
 #include "cybmineCharacter.generated.h"
 
 class UCameraComponent;
@@ -9,8 +11,10 @@ class USpringArmComponent;
 class USceneCaptureComponent2D;
 class UTextureRenderTarget2D;
 class UPointLightComponent;
+class UStaticMeshComponent;
 class UcybmineInventoryComponent;
 class UcybmineCombatComponent;
+class UcybmineItemData;
 
 UCLASS()
 class CYBMINE_API AcybmineCharacter : public ACharacter
@@ -26,6 +30,10 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UcybmineCombatComponent* CombatComponent;
+
+	// Mesh 3D dell'oggetto impugnato (caricata asincronamente solo sui Client)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
+	UStaticMeshComponent* EquippedItemMesh;
 
 	// --- ASPETTO AVATAR ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
@@ -65,6 +73,16 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
+	// --- GESTIONE ASINCRONA GRAFICA OGGETTO EQUIPAGGIATO ---
+	UFUNCTION()
+	void HandleEquippedItemChanged(const FInventoryItem& NewItem);
+
+	void StartAsyncLoadEquippedMesh(UcybmineItemData* ItemData);
+	void OnEquippedMeshAsyncLoaded(FPrimaryAssetId ExpectedItemID, FSoftObjectPath LoadedMeshPath);
+
+	TSharedPtr<FStreamableHandle> EquippedMeshLoadHandle;
+	FPrimaryAssetId CurrentVisualItemID;
+
 	void AutoAssignAnimBlueprint();
 
 	// --- ANIMAZIONI DIRETTE 100% C++ ---
@@ -84,8 +102,6 @@ protected:
 	class UAnimSequence* CurrentPlayingAnim = nullptr;
 
 	void UpdateCharacterAnimation();
-
-
 
 	// --- MOVIMENTO E SPRINT ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")

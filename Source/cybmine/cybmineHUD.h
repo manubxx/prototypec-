@@ -7,6 +7,7 @@
 
 class AcybmineCharacter;
 class UcybmineInventoryComponent;
+class UTexture2D;
 
 UCLASS(BlueprintType, Blueprintable)
 class CYBMINE_API AcybmineHUD : public AHUD
@@ -27,4 +28,11 @@ protected:
 	void DrawHealthBar(float ScreenWidth, float ScreenHeight, float HealthRatio);
 	void DrawHotbar(float CenterX, float ScreenHeight, UcybmineInventoryComponent* InvComp);
 	void DrawInventory(float ScreenWidth, float ScreenHeight, AcybmineCharacter* MyChar);
+
+private:
+	// Cache per icone caricate asincronamente tramite FStreamableManager (zero stutter in UI)
+	UPROPERTY(Transient)
+	TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> LoadedIconCache;
+
+	TSet<FSoftObjectPath> PendingIconLoads;
 };

@@ -2,7 +2,10 @@
 #include "cybmineCharacter.h"
 #include "cybmineInventoryComponent.h"
 #include "cybmineCombatComponent.h"
+#include "cybmineItemData.h"
 #include "Engine/Canvas.h"
+#include "Engine/Texture2D.h"
+#include "Engine/AssetManager.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "CanvasItem.h"
 #include "GameFramework/PlayerController.h"
@@ -29,9 +32,77 @@ void AcybmineHUD::DrawItemInSlot(float SlotX, float SlotY, float SlotSize, const
 {
 	if (Item.IsEmpty()) return;
 
-	// Icona segnaposto colorata centrata nello slot (pronta per icone grafiche future)
-	const float Pad = 10.0f;
-	DrawSolidRect(SlotX + Pad, SlotY + Pad, SlotSize - (Pad * 2.0f), SlotSize - (Pad * 2.0f), Item.IconColor);
+	UcybmineItemData* StaticData = UcybmineInventoryComponent::GetItemData(Item.ItemID);
+	if (!StaticData)
+	{
+		// Se il Data Asset è su disco e non ancora caricato, avvia caricamento asincrono senza bloccare
+		UcybmineInventoryComponent::GetItemDataAsync(Item.ItemID, FOnItemDataLoaded());
+		return;
+	}
+
+	const FLinearColor TintColor = StaticData->IconTint;
+	UTexture2D* IconTex = nullptr;
+
+	if (!StaticData->Icon.IsNull())
+	{
+		const FSoftObjectPath IconPath = StaticData->Icon.ToSoftObjectPath();
+		if (TObjectPtr<UTexture2D>* Cached = LoadedIconCache.Find(IconPath))
+		{
+			IconTex = Cached->Get();
+		}
+		else if (UTexture2D* AlreadyInMemory = StaticData->Icon.Get())
+		{
+			LoadedIconCache.Add(IconPath, AlreadyInMemory);
+			IconTex = AlreadyInMemory;
+		}
+		else if (!PendingIconLoads.Contains(IconPath))
+		{
+			PendingIconLoads.Add(IconPath);
+			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+			Streamable.RequestAsyncLoad(IconPath, FStreamableDelegate::CreateWeakLambda(this, [this, IconPath]()
+				{
+					PendingIconLoads.Remove(IconPath);
+					if (UTexture2D* LoadedTex = Cast<UTexture2D>(IconPath.ResolveObject()))
+					{
+						LoadedIconCache.Add(IconPath, LoadedTex);
+					}
+				}));
+		}
+	}
+
+	const float Pad = 8.0f;
+	const float IconSize = SlotSize - (Pad * 2.0f);
+
+	if (IconTex && IconTex->GetResource())
+	{
+		FCanvasTileItem IconTile(
+			FVector2D(SlotX + Pad, SlotY + Pad),
+			IconTex->GetResource(),
+			FVector2D(IconSize, IconSize),
+			TintColor
+		);
+		IconTile.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(IconTile);
+	}
+	else
+	{
+		// Segnaposto colorato dal Data Asset mentre la texture carica asincronamente o se non assegnata
+		DrawSolidRect(SlotX + Pad, SlotY + Pad, IconSize, IconSize, TintColor);
+	}
+
+	// Barra della durabilità
+	if (StaticData->MaxDurability > 0.0f && Item.CurrentDurability < StaticData->MaxDurability)
+	{
+		const float DurRatio = FMath::Clamp(Item.CurrentDurability / StaticData->MaxDurability, 0.0f, 1.0f);
+		const float BarWidth = SlotSize - 10.0f;
+		const float BarHeight = 3.0f;
+		const float BarX = SlotX + 5.0f;
+		const float BarY = SlotY + SlotSize - 6.0f;
+
+		const FLinearColor DurColor = FLinearColor::LerpUsingHSV(FLinearColor::Red, FLinearColor::Green, DurRatio);
+		DrawSolidRect(BarX, BarY, BarWidth, BarHeight, FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
+		DrawSolidRect(BarX, BarY, BarWidth * DurRatio, BarHeight, DurColor);
+	}
 
 	if (Item.Quantity > 1)
 	{

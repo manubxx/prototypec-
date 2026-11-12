@@ -18,6 +18,7 @@ enum class EItemCategory : uint8
 {
 	None        UMETA(DisplayName = "Nessuno"),
 	Weapon      UMETA(DisplayName = "Arma"),
+	Shield      UMETA(DisplayName = "Scudo"),
 	Tool        UMETA(DisplayName = "Strumento"),
 	Block       UMETA(DisplayName = "Blocco"),
 	Food        UMETA(DisplayName = "Cibo"),
@@ -32,40 +33,30 @@ struct FInventoryItem
 {
 	GENERATED_BODY()
 
+	// Puntatore leggerissimo al UcybmineItemData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	FName ItemID = NAME_None;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	FText DisplayName;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	EItemCategory Category = EItemCategory::None;
+	FPrimaryAssetId ItemID;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	int32 Quantity = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	int32 MaxStackSize = 64;
+	float CurrentDurability = 0.0f;
 
+	// ID univoco per tracciare oggetti non impilabili nelle aste ed evitare duplicazioni
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	float StatValue = 0.0f; // Danno per armi, Difesa per armature, Cura per cibo
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
-	FLinearColor IconColor = FLinearColor::White;
+	FGuid UniqueInstanceID;
 
 	bool IsEmpty() const
 	{
-		return ItemID == NAME_None || Quantity <= 0;
+		return !ItemID.IsValid() || Quantity <= 0;
 	}
 
 	void Clear()
 	{
-		ItemID = NAME_None;
-		DisplayName = FText::GetEmpty();
-		Category = EItemCategory::None;
+		ItemID = FPrimaryAssetId();
 		Quantity = 0;
-		MaxStackSize = 64;
-		StatValue = 0.0f;
-		IconColor = FLinearColor::White;
+		CurrentDurability = 0.0f;
+		UniqueInstanceID.Invalidate();
 	}
 };

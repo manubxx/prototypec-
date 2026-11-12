@@ -1,6 +1,7 @@
 #include "cybmineCharacter.h"
 #include "cybmineInventoryComponent.h"
 #include "cybmineCombatComponent.h"
+#include "cybmineItemData.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -8,6 +9,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/PointLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/AssetManager.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "Animation/AnimInstance.h"
@@ -68,6 +72,13 @@ AcybmineCharacter::AcybmineCharacter()
 	GetMesh()->SetOwnerNoSee(false);
 	GetMesh()->bCastHiddenShadow = true;
 
+	// Mesh 3D oggetto impugnato (attaccata alla mano destra del manichino)
+	EquippedItemMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EquippedItemMesh"));
+	EquippedItemMesh->SetupAttachment(GetMesh(), FName("hand_r"));
+	EquippedItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EquippedItemMesh->SetRelativeScale3D(FVector(0.25f));
+	EquippedItemMesh->SetVisibility(false);
+
 	// Anteprima 3D per inventario
 	PreviewSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("PreviewSpringArm"));
 	PreviewSpringArm->SetupAttachment(GetCapsuleComponent());
@@ -104,10 +115,8 @@ void AcybmineCharacter::AutoAssignAnimBlueprint()
 		return;
 	}
 
-	// Passa alla modalità SingleNode controllata al 100% dal nostro C++
 	GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 
-	// Scansiona /Game per trovare le AnimSequence del manichino (Idle, Walk, Run, Jump)
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	FARFilter Filter;
 	Filter.ClassPaths.Add(UAnimSequence::StaticClass()->GetClassPathName());
@@ -148,11 +157,9 @@ void AcybmineCharacter::AutoAssignAnimBlueprint()
 		}
 	}
 
-	// Fallback se mancasse Walk o Run
 	if (!AnimWalk) AnimWalk = AnimRun;
 	if (!AnimRun) AnimRun = AnimWalk;
 
-	// Avvia subito l'Idle
 	if (AnimIdle)
 	{
 		GetMesh()->PlayAnimation(AnimIdle, true);
@@ -221,19 +228,125 @@ void AcybmineCharacter::BeginPlay()
 	Super::BeginPlay();
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 
-	AutoAssignAnimBlueprint();
-	ApplyAvatarColor(AvatarTintColor);
-
-	PreviewRenderTarget = NewObject<UTextureRenderTarget2D>(this);
-	PreviewRenderTarget->InitAutoFormat(256, 384);
-	PreviewRenderTarget->ClearColor = FLinearColor(0.05f, 0.05f, 0.05f, 1.0f);
-	PreviewRenderTarget->UpdateResourceImmediate(true);
-
-	if (PreviewCaptureComponent)
+	if (InventoryComponent)
 	{
-		PreviewCaptureComponent->TextureTarget = PreviewRenderTarget;
-		PreviewCaptureComponent->ShowOnlyActors.Add(this);
-		PreviewCaptureComponent->ShowOnlyComponents.Add(GetMesh());
+		InventoryComponent->OnEquippedItemChanged.AddDynamic(this, &AcybmineCharacter::HandleEquippedItemChanged);
+	}
+
+	// Il Dedicated Server non carica animazioni, mesh 3D o RenderTarget
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		AutoAssignAnimBlueprint();
+		ApplyAvatarColor(AvatarTintColor);
+
+		PreviewRenderTarget = NewObject<UTextureRenderTarget2D>(this);
+		PreviewRenderTarget->InitAutoFormat(256, 384);
+		PreviewRenderTarget->ClearColor = FLinearColor(0.05f, 0.05f, 0.05f, 1.0f);
+		PreviewRenderTarget->UpdateResourceImmediate(true);
+
+		if (PreviewCaptureComponent)
+		{
+			PreviewCaptureComponent->TextureTarget = PreviewRenderTarget;
+			PreviewCaptureComponent->ShowOnlyActors.Add(this);
+			PreviewCaptureComponent->ShowOnlyComponents.Add(GetMesh());
+			if (EquippedItemMesh)
+			{
+				PreviewCaptureComponent->ShowOnlyComponents.Add(EquippedItemMesh);
+			}
+		}
+
+		if (InventoryComponent)
+		{
+			HandleEquippedItemChanged(InventoryComponent->GetSelectedHotbarItem());
+		}
+	}
+}
+
+void AcybmineCharacter::HandleEquippedItemChanged(const FInventoryItem& NewItem)
+{
+	// Il Dedicated Server conosce solo gli ID, non carica mai grafica
+	if (GetNetMode() == NM_DedicatedServer || !EquippedItemMesh)
+	{
+		return;
+	}
+
+	// Annulla eventuale caricamento asincrono precedente in corso
+	if (EquippedMeshLoadHandle.IsValid())
+	{
+		EquippedMeshLoadHandle->CancelHandle();
+		EquippedMeshLoadHandle.Reset();
+	}
+
+	if (NewItem.IsEmpty())
+	{
+		CurrentVisualItemID = FPrimaryAssetId();
+		EquippedItemMesh->SetStaticMesh(nullptr);
+		EquippedItemMesh->SetVisibility(false);
+		return;
+	}
+
+	CurrentVisualItemID = NewItem.ItemID;
+
+	// Se il Data Asset è già in RAM lo usiamo subito, altrimenti lo carichiamo asincronamente
+	if (UcybmineItemData* CachedData = UcybmineInventoryComponent::GetItemData(NewItem.ItemID))
+	{
+		StartAsyncLoadEquippedMesh(CachedData);
+	}
+	else
+	{
+		const FPrimaryAssetId ExpectedID = NewItem.ItemID;
+		UcybmineInventoryComponent::GetItemDataAsync(ExpectedID, FOnItemDataLoaded::CreateWeakLambda(this, [this, ExpectedID](UcybmineItemData* LoadedData)
+			{
+				if (CurrentVisualItemID == ExpectedID && LoadedData)
+				{
+					StartAsyncLoadEquippedMesh(LoadedData);
+				}
+			}));
+	}
+}
+
+void AcybmineCharacter::StartAsyncLoadEquippedMesh(UcybmineItemData* ItemData)
+{
+	if (!ItemData || ItemData->WorldStaticMesh.IsNull())
+	{
+		EquippedItemMesh->SetStaticMesh(nullptr);
+		EquippedItemMesh->SetVisibility(false);
+		return;
+	}
+
+	// Se la mesh 3D è già caricata in RAM, la applichiamo istantaneamente
+	if (UStaticMesh* AlreadyLoadedMesh = ItemData->WorldStaticMesh.Get())
+	{
+		EquippedItemMesh->SetStaticMesh(AlreadyLoadedMesh);
+		EquippedItemMesh->SetVisibility(true);
+		return;
+	}
+
+	// Altrimenti avvia caricamento asincrono tramite FStreamableManager
+	const FPrimaryAssetId ExpectedID = ItemData->GetPrimaryAssetId();
+	const FSoftObjectPath MeshPath = ItemData->WorldStaticMesh.ToSoftObjectPath();
+
+	FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+	EquippedMeshLoadHandle = Streamable.RequestAsyncLoad(
+		MeshPath,
+		FStreamableDelegate::CreateUObject(this, &AcybmineCharacter::OnEquippedMeshAsyncLoaded, ExpectedID, MeshPath)
+	);
+}
+
+void AcybmineCharacter::OnEquippedMeshAsyncLoaded(FPrimaryAssetId ExpectedItemID, FSoftObjectPath LoadedMeshPath)
+{
+	EquippedMeshLoadHandle.Reset();
+
+	// Verifica che il giocatore non abbia già cambiato slot mentre caricava
+	if (CurrentVisualItemID != ExpectedItemID || !EquippedItemMesh)
+	{
+		return;
+	}
+
+	if (UStaticMesh* LoadedMesh = Cast<UStaticMesh>(LoadedMeshPath.ResolveObject()))
+	{
+		EquippedItemMesh->SetStaticMesh(LoadedMesh);
+		EquippedItemMesh->SetVisibility(true);
 	}
 }
 
