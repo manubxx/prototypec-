@@ -413,6 +413,10 @@ void AcybmineCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 	// Combattimento & Movimento
 	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AcybmineCharacter::PerformAttack);
+	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AcybmineCharacter::PerformAttack);
+	// Binding per lo Scudo / Parata
+	PlayerInputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AcybmineCharacter::StartBlock);
+	PlayerInputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AcybmineCharacter::StopBlock);
 	PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &AcybmineCharacter::DoJumpStart);
 	PlayerInputComponent->BindKey(EKeys::SpaceBar, IE_Released, this, &AcybmineCharacter::DoJumpEnd);
 	PlayerInputComponent->BindKey(EKeys::LeftControl, IE_Pressed, this, &AcybmineCharacter::ToggleSprint);
@@ -587,4 +591,15 @@ void AcybmineCharacter::PerformAttack()
 
 	PunchAnimAlpha = 1.0f;
 	CombatComponent->PerformAttack(FirstPersonCamera);
+}
+void AcybmineCharacter::StartBlock()
+{
+	if (IsInventoryOpen() || !CombatComponent) return;
+	CombatComponent->Server_SetBlocking(true);
+}
+
+void AcybmineCharacter::StopBlock()
+{
+	if (!CombatComponent) return;
+	CombatComponent->Server_SetBlocking(false);
 }

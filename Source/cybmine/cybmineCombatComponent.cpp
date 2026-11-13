@@ -5,10 +5,23 @@
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
 #include "DrawDebugHelpers.h"
+#include "Net/UnrealNetwork.h" // Necessario per la replicazione
 
 UcybmineCombatComponent::UcybmineCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+
+	// Abilita la replicazione per il componente
+	SetIsReplicatedByDefault(true);
+	CombatState = ECombatState::Idle;
+}
+
+void UcybmineCombatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// Registra lo stato di combattimento per la sincronizzazione Rete
+	DOREPLIFETIME(UcybmineCombatComponent, CombatState);
 }
 
 void UcybmineCombatComponent::BeginPlay()
@@ -38,6 +51,24 @@ float UcybmineCombatComponent::GetTimeSinceLastHitConfirm() const
 	return GetWorld()->GetTimeSeconds() - LastHitConfirmTime;
 }
 
+void UcybmineCombatComponent::Server_SetBlocking_Implementation(bool bIsBlocking)
+{
+	// Il server decide se possiamo parare o meno
+	if (bIsBlocking && CombatState == ECombatState::Idle)
+	{
+		CombatState = ECombatState::Blocking;
+	}
+	else if (!bIsBlocking && CombatState == ECombatState::Blocking)
+	{
+		CombatState = ECombatState::Idle;
+	}
+}
+
+void UcybmineCombatComponent::OnRep_CombatState()
+{
+	// Qui in futuro potrai inserire logica per effetti visivi o suoni sul Client
+}
+
 float UcybmineCombatComponent::HandleIncomingDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
 	if (IsInvulnerable() || CurrentHealth <= 0.0f || !GetWorld())
@@ -45,15 +76,49 @@ float UcybmineCombatComponent::HandleIncomingDamage(float DamageAmount, FDamageE
 		return 0.0f;
 	}
 
-	CurrentHealth = FMath::Clamp(CurrentHealth - DamageAmount, 0.0f, MaxHealth);
-	LastDamageTakenTime = GetWorld()->GetTimeSeconds();
+	float FinalDamage = DamageAmount;
 
-	if (CurrentHealth <= 0.0f && GetOwner())
+	// --- FASE 3: GESTIONE PARATA DIREZIONALE ---
+	if (CombatState == ECombatState::Blocking && DamageCauser && GetOwner())
 	{
-		GetOwner()->Destroy();
+		// Calcola direzione attacco rispetto a dove stiamo guardando
+		FVector DirectionToAttacker = (DamageCauser->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+		FVector MyForwardVector = GetOwner()->GetActorForwardVector();
+
+		float DotProduct = FVector::DotProduct(MyForwardVector, DirectionToAttacker);
+
+		// Se l'attacco proviene dal cono frontale
+		if (DotProduct >= BlockAngleThreshold)
+		{
+			// TODO: Detrai la Stamina qui quando avremo le stats collegate
+			bool bHasEnoughStamina = true;
+
+			if (bHasEnoughStamina)
+			{
+				// Parata riuscita: danno annullato
+				FinalDamage = 0.0f;
+			}
+			else
+			{
+				// Stamina finita: stordimento
+				CombatState = ECombatState::Stunned;
+			}
+		}
 	}
 
-	return DamageAmount;
+	// Applica il danno effettivo se non è stato parato
+	if (FinalDamage > 0.0f)
+	{
+		CurrentHealth = FMath::Clamp(CurrentHealth - FinalDamage, 0.0f, MaxHealth);
+		LastDamageTakenTime = GetWorld()->GetTimeSeconds();
+
+		if (CurrentHealth <= 0.0f && GetOwner())
+		{
+			GetOwner()->Destroy();
+		}
+	}
+
+	return FinalDamage;
 }
 
 void UcybmineCombatComponent::PerformAttack(UCameraComponent* AimCamera)

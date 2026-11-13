@@ -158,4 +158,10 @@ public:
 	void DoJumpEnd();
 
 	void PerformAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void StartBlock();
+
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void StopBlock();
 };

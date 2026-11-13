@@ -6,6 +6,16 @@
 
 class UCameraComponent;
 
+// Enumerazione degli stati di combattimento
+UENUM(BlueprintType)
+enum class ECombatState : uint8
+{
+	Idle		UMETA(DisplayName = "Idle"),
+	Attacking	UMETA(DisplayName = "Attacking"),
+	Blocking	UMETA(DisplayName = "Blocking"),
+	Stunned		UMETA(DisplayName = "Stunned")
+};
+
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class CYBMINE_API UcybmineCombatComponent : public UActorComponent
 {
@@ -43,6 +53,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float VerticalKnockback = 320.0f;
 
+	// --- PARAMETRI PARATA ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Blocking")
+	float BlockAngleThreshold = 0.5f; // ~60 gradi frontali
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Blocking")
+	float StaminaBlockCost = 15.0f;
+
 	// --- AZIONI & STATO ---
 	void PerformAttack(UCameraComponent* AimCamera);
 	float HandleIncomingDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser);
@@ -56,8 +73,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	float GetTimeSinceLastHitConfirm() const;
 
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	ECombatState GetCombatState() const { return CombatState; }
+
+	// RPC per comunicare al server l'intenzione di parare
+	UFUNCTION(Server, Reliable)
+	void Server_SetBlocking(bool bIsBlocking);
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CombatState, BlueprintReadOnly, Category = "Combat|State")
+	ECombatState CombatState;
+
+	UFUNCTION()
+	void OnRep_CombatState();
 
 private:
 	float LastAttackTime = -10.0f;

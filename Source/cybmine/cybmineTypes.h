@@ -4,7 +4,31 @@
 #include "Net/Serialization/FastArraySerializer.h"
 #include "cybmineTypes.generated.h"
 
+// ==========================================
+// 1. ENUMERAZIONI BASE (Indipendenti)
+// ==========================================
 
+// --- SISTEMA CHAT ---
+UENUM(BlueprintType)
+enum class EChatChannel : uint8
+{
+	Global		UMETA(DisplayName = "Globale"),
+	Local		UMETA(DisplayName = "Locale"),
+	Faction		UMETA(DisplayName = "Fazione"),
+	System		UMETA(DisplayName = "Sistema")
+};
+
+// --- GRADI FAZIONE ---
+UENUM(BlueprintType)
+enum class EFactionRank : uint8
+{
+	Recruit		UMETA(DisplayName = "Recluta"),
+	Member		UMETA(DisplayName = "Membro"),
+	Officer		UMETA(DisplayName = "Ufficiale"),
+	Leader		UMETA(DisplayName = "Leader")
+};
+
+// --- LAVORI GIOCATORE ---
 UENUM(BlueprintType)
 enum class EPlayerJob : uint8
 {
@@ -15,20 +39,7 @@ enum class EPlayerJob : uint8
 	Builder     UMETA(DisplayName = "Costruttore")
 };
 
-
-class UcybmineInventoryComponent;
-
-namespace CybmineConstants
-{
-	static constexpr int32 HotbarSlotCount = 6;
-	static constexpr int32 InventoryRows = 3;
-	static constexpr int32 InventoryCols = 6;
-	static constexpr int32 MainInventorySlotCount = InventoryRows * InventoryCols; // 18
-	static constexpr int32 TotalStorageSlotCount = MainInventorySlotCount + HotbarSlotCount; // 24 (0..5 Hotbar, 6..23 Zaino)
-	static constexpr int32 ArmorSlotCount = 4; // 0: Elmo, 1: Corazza, 2: Gambali, 3: Stivali
-	static constexpr float MaxContainerInteractDistance = 450.0f; // 4.5 metri anti-exploit
-}
-
+// --- CONTENITORI ---
 UENUM(BlueprintType)
 enum class ECybmineContainerType : uint8
 {
@@ -38,6 +49,7 @@ enum class ECybmineContainerType : uint8
 	LootBag         UMETA(DisplayName = "Sacco Loot PvP")
 };
 
+// --- CATEGORIE OGGETTI ---
 UENUM(BlueprintType)
 enum class EItemCategory : uint8
 {
@@ -52,6 +64,79 @@ enum class EItemCategory : uint8
 	Leggings    UMETA(DisplayName = "Gambali"),
 	Boots       UMETA(DisplayName = "Stivali")
 };
+
+
+// ==========================================
+// 2. STRUTTURE FAZIONE E COSTANTI
+// ==========================================
+
+USTRUCT(BlueprintType)
+struct FFactionMember
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FString PlayerName;
+
+	UPROPERTY(BlueprintReadWrite)
+	EFactionRank Rank;
+
+	FFactionMember() : PlayerName(TEXT("Unknown")), Rank(EFactionRank::Recruit) {}
+	FFactionMember(FString InName, EFactionRank InRank) : PlayerName(InName), Rank(InRank) {}
+};
+
+USTRUCT(BlueprintType)
+struct FFactionClaim
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FIntPoint ChunkCoords;
+
+	UPROPERTY(BlueprintReadWrite)
+	FGuid FactionID;
+
+	FFactionClaim() : ChunkCoords(FIntPoint(0, 0)), FactionID(FGuid()) {}
+	FFactionClaim(FIntPoint InCoords, FGuid InFactionID) : ChunkCoords(InCoords), FactionID(InFactionID) {}
+};
+
+USTRUCT(BlueprintType)
+struct FFactionData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FGuid FactionID;
+
+	UPROPERTY(BlueprintReadWrite)
+	FString FactionName;
+
+	UPROPERTY(BlueprintReadWrite)
+	TMap<FString, FFactionMember> Members;
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 BankBalance;
+
+	FFactionData() : FactionID(FGuid()), FactionName(TEXT("")), BankBalance(0) {}
+};
+
+class UcybmineInventoryComponent;
+
+namespace CybmineConstants
+{
+	static constexpr int32 HotbarSlotCount = 6;
+	static constexpr int32 InventoryRows = 3;
+	static constexpr int32 InventoryCols = 6;
+	static constexpr int32 MainInventorySlotCount = InventoryRows * InventoryCols; // 18
+	static constexpr int32 TotalStorageSlotCount = MainInventorySlotCount + HotbarSlotCount; // 24
+	static constexpr int32 ArmorSlotCount = 4;
+	static constexpr float MaxContainerInteractDistance = 450.0f;
+}
+
+
+// ==========================================
+// 3. CORE ITEM (Deve precedere Aste e Slots)
+// ==========================================
 
 USTRUCT(BlueprintType)
 struct FInventoryItem
@@ -84,6 +169,38 @@ struct FInventoryItem
 	}
 };
 
+
+// ==========================================
+// 4. STRUTTURE DIPENDENTI DA FInventoryItem
+// ==========================================
+
+// --- SISTEMA ASTE (AUCTION HOUSE) ---
+USTRUCT(BlueprintType)
+struct FAuctionListing
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FGuid AuctionID;
+
+	UPROPERTY(BlueprintReadWrite)
+	FString SellerPlayerID;
+
+	UPROPERTY(BlueprintReadWrite)
+	FString SellerName;
+
+	UPROPERTY(BlueprintReadWrite)
+	FInventoryItem ItemToSell; // Ora compila correttamente perché FInventoryItem è dichiarato sopra
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 BuyoutPrice;
+
+	UPROPERTY(BlueprintReadWrite)
+	FDateTime ExpirationTime;
+
+	FAuctionListing() : AuctionID(FGuid()), SellerPlayerID(""), SellerName(""), BuyoutPrice(0) {}
+};
+
 // --- SINGOLO SLOT DELTA-REPLICATO ---
 USTRUCT(BlueprintType)
 struct FCybmineInventorySlotEntry : public FFastArraySerializerItem
@@ -101,7 +218,11 @@ struct FCybmineInventorySlotEntry : public FFastArraySerializerItem
 	void PostReplicatedChange(const struct FCybmineInventoryList& InArraySerializer);
 };
 
-// --- CONTENITORE FAST ARRAY SERIALIZER ---
+
+// ==========================================
+// 5. LISTE E SERIALIZZAZIONE
+// ==========================================
+
 USTRUCT(BlueprintType)
 struct FCybmineInventoryList : public FFastArraySerializer
 {
