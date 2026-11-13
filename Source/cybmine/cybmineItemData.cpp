@@ -12,7 +12,8 @@ void UcybmineItemData::RegisterCodeItems()
 {
 	if (CodeItemRegistry.Num() > 0) return;
 
-	auto CreateItem = [](FName IDName, const FString& Name, EItemCategory Cat, int32 MaxStack, int32 Gold, FLinearColor Tint, float Stat, float BlockRed, float Durability, const TCHAR* MeshPath = nullptr)
+	// Aggiornata la lambda per supportare EquipSocketName
+	auto CreateItem = [](FName IDName, const FString& Name, EItemCategory Cat, int32 MaxStack, int32 Gold, FLinearColor Tint, float Stat, float BlockRed, float Durability, const TCHAR* MeshPath = nullptr, FName SocketName = NAME_None)
 		{
 			UcybmineItemData* Item = NewObject<UcybmineItemData>(GetTransientPackage(), IDName);
 			Item->AddToRoot(); // Evita che il Garbage Collector lo elimini
@@ -25,6 +26,7 @@ void UcybmineItemData::RegisterCodeItems()
 			Item->PrimaryStatValue = Stat;
 			Item->BlockDamageReduction = BlockRed;
 			Item->MaxDurability = Durability;
+			Item->EquipSocketName = SocketName; // Assegnazione della Socket
 
 			if (MeshPath)
 			{
@@ -45,7 +47,8 @@ void UcybmineItemData::RegisterCodeItems()
 		25.0f,  // Danno
 		0.0f,   // Riduzione Parata
 		250.0f, // Durabilità
-		TEXT("/Engine/BasicShapes/Cube.Cube")
+		TEXT("/Engine/BasicShapes/Cube.Cube"), // Cambierai questo percorso con la tua mesh della spada
+		FName("Hand_R_Socket") // Attaccata alla mano destra
 	);
 
 	CreateItem(
@@ -58,7 +61,8 @@ void UcybmineItemData::RegisterCodeItems()
 		0.0f,   // Danno
 		0.75f,  // Parata riduce il 75% del danno
 		180.0f, // Durabilità
-		TEXT("/Engine/BasicShapes/Cylinder.Cylinder")
+		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"),
+		FName("Hand_L_Socket") // Attaccato alla mano sinistra
 	);
 
 	CreateItem(
@@ -72,6 +76,7 @@ void UcybmineItemData::RegisterCodeItems()
 		0.0f,
 		0.0f,   // Indistruttibile
 		TEXT("/Engine/BasicShapes/Cube.Cube")
+		// Nessuna socket necessaria per un blocco generico
 	);
 }
 

@@ -31,7 +31,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Economy", meta = (ClampMin = "0"))
 	int32 BaseGoldValue = 1;
 
-	// --- GRAFICA (Lazy Loaded tramite TSoftObjectPtr) ---
+	// --- GRAFICA E POSIZIONAMENTO (Lazy Loaded tramite TSoftObjectPtr) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visuals")
 	TSoftObjectPtr<UTexture2D> Icon;
 
@@ -43,6 +43,10 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visuals")
 	TSoftObjectPtr<USkeletalMesh> EquippedSkeletalMesh;
+
+	// NUOVO: Nome della Socket (es. "Hand_R_Socket") a cui attaccarlo quando equipaggiato
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visuals")
+	FName EquipSocketName;
 
 	// --- STATISTICHE COMBATTIMENTO / UTILIZZO ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Stats")

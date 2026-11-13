@@ -4,6 +4,18 @@
 #include "Net/Serialization/FastArraySerializer.h"
 #include "cybmineTypes.generated.h"
 
+
+UENUM(BlueprintType)
+enum class EPlayerJob : uint8
+{
+	None        UMETA(DisplayName = "Disoccupato"),
+	Miner       UMETA(DisplayName = "Minatore"),
+	Blacksmith  UMETA(DisplayName = "Fabbro"),
+	Warrior     UMETA(DisplayName = "Guerriero"),
+	Builder     UMETA(DisplayName = "Costruttore")
+};
+
+
 class UcybmineInventoryComponent;
 
 namespace CybmineConstants
